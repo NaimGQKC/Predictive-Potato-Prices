@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "patata"
+version = "0.1.0"
+description = "Esqueleto de evaluacion para prediccion del precio de la patata"
+requires-python = ">=3.10"
+dependencies = [
+    "duckdb>=1.0",
+    "pandas>=2.0",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4"]
+
+[tool.setuptools.packages.find]
+include = ["patata*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error::RuntimeWarning"]
