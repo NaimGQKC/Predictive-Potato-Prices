@@ -1,15 +1,20 @@
-# Predictive-Potato-Prices — Fase 0: esqueleto de evaluación
+# Predictive-Potato-Prices
 
 Sistema para predecir el precio de la patata en España a 4 semanas vista.
 Cliente: envasador que compra ~40.000 t/año en mercado libre.
 
-**Esta fase no contiene ningún modelo.** Contiene la infraestructura que
-decidirá si un modelo futuro merece la pena. La pregunta que responde es una
-sola:
+Dos fases entregadas:
+
+- **Fase 0 — esqueleto de evaluación.** Almacén point-in-time, features con
+  doble fecha, backtest walk-forward, baseline naive y métricas. Sin modelos.
+- **Fase 1 — retadores.** Baseline estacional, lineal regularizado y LightGBM,
+  todos por el mismo motor. Responde a la pregunta original:
 
 > ¿es batible la regla tonta "el precio dentro de 4 semanas = el de hoy"?
 
-Y, sobre todo, deja montado el aparato para que esa respuesta no sea mentira.
+**Sobre la serie sintética, sí, y por mucho.** Con el detalle importante de que
+eso no dice nada todavía sobre el mercado real — ver *Qué significa y qué no*
+más abajo.
 
 ---
 
@@ -55,21 +60,24 @@ patata/
   db.py              conexión al fichero .db único
   loaders/falso.py   1.100 semanas sintéticas con estacionalidad, ciclo y ruido
   features.py        constructor de features con la regla de doble fecha
-  predictores.py     baseline naive (y el contrato para modelos futuros)
+  predictores.py     naive, naive estacional, lineal regularizado, LightGBM
   backtest.py        motor walk-forward + auditoría anti-fuga
   metricas.py        MAPE, RMSE, MAE, dirección, clasificación, skill score
   evaluacion.py      de predicciones crudas a tabla de resultados
+  economia.py        de decisiones a euros por kg
+  placebo.py         control negativo: destruir la señal y comprobar que se nota
   pipeline.py        orquestación
 scripts/run_eval.py  ejecuta todo y saca la tabla
-tests/               52 tests
+tests/               67 tests
 ```
 
 ## Cómo se ejecuta
 
 ```bash
 pip install -r requirements.txt
-python scripts/run_eval.py --csv data/salidas
-python -m pytest tests/ -q
+python scripts/run_eval.py --csv data/salidas   # ~3,5 min
+python scripts/run_eval.py --placebo            # control negativo
+python -m pytest tests/ -q                      # ~2 min
 ```
 
 Genera `data/patata.db` (un solo fichero DuckDB) con las tablas `raw_lonja`,
@@ -107,80 +115,150 @@ tiempo real.
 
 ---
 
-## Resultado: el listón a batir
+## Resultados
 
-Sobre **datos sintéticos** (526 orígenes semanales, 2015–2025, 522 puntuables):
+522 orígenes semanales evaluados (2015–2025), ventana expansiva, reentrenando
+cada semana. Todo sobre la serie sintética.
 
-| métrica | naive |
-|---|---|
-| MAPE | 15,52 % |
-| RMSE | 0,0409 €/kg |
-| MAE | 0,0326 €/kg |
-| accuracy de la decisión (b) | 59,6 % |
-| recall de la decisión (b) | 0,0 % |
-| tasa base ("comprar ahora") | 40,4 % |
+### (a) Regresión — precio a 4 semanas
 
-Tres lecturas que condicionan la fase siguiente:
+| predictor | MAPE | RMSE €/kg | MAE €/kg | acierto dirección | skill MAPE | dm_t |
+|---|---|---|---|---|---|---|
+| **lineal_regularizado** | **10,12 %** | **0,0294** | **0,0219** | **75,7 %** | **+0,348** | **−5,69** |
+| lgbm | 11,17 % | 0,0313 | 0,0239 | 72,8 % | +0,280 | −4,60 |
+| naive_estacional | 15,16 % | 0,0450 | 0,0330 | 66,7 % | +0,023 | +1,67 |
+| naive_ultimo_precio | 15,52 % | 0,0409 | 0,0326 | — (no opina) | 0 | — |
 
-**La naive no opina sobre la dirección.** Predice exactamente el precio de
-referencia, así que su variación prevista es 0 y nunca dice ni "sube" ni "baja".
-Reportar un 0 % de acierto de dirección sería mentir sobre lo que hace; el
-código devuelve `NaN` y reporta aparte la cobertura (0 %) y el listón real:
-apostar siempre a la dirección más frecuente, **50,2 %**.
+El listón de dirección es 50,2 % (apostar siempre a la más frecuente).
 
-**En la decisión (b) la naive es estructuralmente inútil.** Como su variación
-prevista es 0 y 0 < 0,01 €/kg, *siempre* dice "no compres ahora, espera". Su
-59,6 % de accuracy es puro artefacto de la clase mayoritaria y su recall es
-cero: no detecta ni una sola de las subidas que justificarían comprar. Por eso
-el listón de (b) no es la naive, es la clase mayoritaria (59,6 %), y la métrica
-que hay que mirar es la **accuracy balanceada por encima de 0,5**.
+### (b) Decisión — comprar ahora vs esperar
 
-**El MAPE varía entre 10,9 % y 21,3 % según el año.** Cualquier mejora que no
-aguante año a año es ruido. Por eso `tabla_por_anyo` está en la salida estándar
-y no como extra.
+| predictor | accuracy | precisión | recall | acc. balanceada |
+|---|---|---|---|---|
+| lgbm | **74,7 %** | **69,3 %** | 67,3 % | **73,5 %** |
+| lineal_regularizado | 71,5 % | 62,0 % | **75,8 %** | 72,2 % |
+| naive_estacional | 64,0 % | 55,7 % | 53,1 % | 62,2 % |
+| naive_ultimo_precio | 59,6 % | — | 0,0 % | 50,0 % |
 
-> Estos números son de la serie sintética y sirven para validar el esqueleto.
-> Con datos reales cambiarán. Lo que no cambia es el procedimiento.
+Clase mayoritaria 59,6 %, tasa base 40,4 %.
 
-## ¿Es batible entonces?
+### En euros
 
-El esqueleto no lo decide: lo mide. Lo que sí deja fijado es qué contaría como
-respuesta afirmativa, y son cuatro condiciones a la vez:
+Coste medio de compra, decisiones semanales, 40.000 t/año:
 
-1. MAPE y RMSE por debajo de los de la naive (`skill_mape`, `skill_rmse` > 0),
-2. accuracy balanceada de (b) por encima de 0,5, con recall no trivial,
-3. estable año a año, no ganando en dos años y perdiendo en ocho,
-4. con la diferencia fuera del ruido (`dm_t`, test pareado sobre los errores al
-   cuadrado, con corrección de Newey-West por el solape de horizontes).
+| estrategia | coste €/kg | ahorro €/kg | ahorro anual | % del máximo |
+|---|---|---|---|---|
+| oráculo perfecto | 0,2164 | 0,0113 | 453.226 € | 100 % |
+| **lgbm** | **0,2218** | **0,0060** | **238.452 €** | **52,6 %** |
+| lineal_regularizado | 0,2227 | 0,0051 | 202.421 € | 44,7 % |
+| naive_estacional | 0,2271 | 0,0006 | 25.992 € | 5,7 % |
+| naive / siempre esperar | 0,2277 | 0 | 0 € | 0 % |
+| siempre comprar ya | 0,2386 | −0,0108 | −433.931 € | −95,7 % |
 
-Sobre la serie sintética hay margen para (1) y (2): la variación a 4 semanas
-tiene componente estacional y reversión a la media, que la naive no captura.
-Sobre datos reales está por ver, y ese es exactamente el punto de haber montado
-esto antes que el modelo.
+---
+
+## Qué significa y qué no
+
+**Sí, la naive es batible — sobre datos sintéticos.** La diferencia es grande
+(35 % menos de MAPE) y estadísticamente sólida (`dm_t` = −5,7, muy fuera del
+ruido). Pero la serie la generé yo con estacionalidad y reversión a la media
+explícitas. Que un modelo las encuentre demuestra que **el aparato detecta señal
+cuando la hay**; no demuestra que haya señal en el mercado real. Ese número solo
+sale con datos de lonja.
+
+Lo que sí se traslada al mundo real son estas cuatro lecturas:
+
+**El modelo lineal gana al LightGBM en regresión.** Con ~600 filas de
+entrenamiento y ~40 columnas, el gradient boosting tiene de sobra para memorizar
+y no le llega para generalizar mejor que un ridge. Es un argumento fuerte para
+**no** empezar por LightGBM cuando lleguen los datos reales: el orden correcto
+es naive → estacional → lineal → boosting, y parar en cuanto deje de mejorar.
+
+**El mejor modelo de regresión no es el que más dinero ahorra.** LightGBM pierde
+en MAPE y gana en euros (238k € vs 202k €), porque el dinero depende de la
+*precisión* de la decisión binaria (69,3 % vs 62,0 %), no del error de
+predicción. Equivocarse recomendando comprar cuesta caro; equivocarse por 2
+céntimos en un precio que no se usa para decidir, no cuesta nada. **La métrica
+que manda es la de la decisión, no la del precio.**
+
+**El baseline estacional casi no aporta.** Mejora el MAPE un 2 % y *empeora* el
+RMSE un 10 %, con `dm_t` = +1,67: dentro del ruido. Copiar la variación del año
+pasado no basta. Está en la tabla precisamente porque un retador que no gana es
+información útil.
+
+**El techo es finito.** Ni con predicción perfecta se ahorra más de 0,0113 €/kg
+(453k €/año sobre 40.000 t). Eso acota cuánto tiene sentido invertir en el
+sistema, y hay que decirlo antes de prometer nada.
+
+## El control negativo (lo más importante de esta fase)
+
+Un backtest con buenos números puede estar midiendo dos cosas muy distintas:
+que el modelo predice, o que se coló información del futuro. Los tests de doble
+fecha atacan el problema por construcción; el placebo lo ataca por el resultado.
+
+`python scripts/run_eval.py --placebo` baraja la variación objetivo entre
+orígenes dejando las features intactas. Después de barajar no queda nada que
+predecir, así que **todos los skill deben caer a ≤ 0 y las accuracy balanceadas
+a ~0,5**. Es lo que pasa. Si algún día un modelo gana en modo placebo, hay fuga.
+
+Merece la pena contar cómo salió, porque es instructivo: la primera versión del
+placebo **no colapsó** — los modelos seguían sacando skill 0,29 y accuracy
+balanceada 0,81. No era fuga: era el placebo mal diseñado. Barajaba el *nivel*
+del precio objetivo, y eso crea una señal nueva y perfectamente aprendible, ya
+que `variación = precio_al_azar − precio_ref` se predice muy bien conociendo
+`precio_ref`. Hay que barajar **la variación**, que es lo que los modelos
+predicen. Está documentado en `patata/placebo.py` para que nadie lo revierta.
 
 ---
 
 ## Decisiones tomadas (y dónde revisarlas)
 
+- **Los modelos predicen la variación, no el nivel** (`predictores.py`). El
+  precio de la patata no es estacionario: un modelo entrenado sobre el nivel
+  aprende la media histórica y la arrastra. Prediciendo la variación tiene que
+  ganarse cada euro contra la naive.
+- **Imputación y estandarizado se ajustan dentro de cada ventana**, nunca sobre
+  la tabla entera. Ajustarlos globalmente mete medias del futuro en el pasado;
+  es una fuga sutil y muy común.
+- **Hiperparámetros fijos, sin tunear** (`config.PARAMS_LGBM`). Con 522 puntos
+  de evaluación, ajustarlos mirando el backtest es sobreajustar el backtest. Si
+  algún día se tunean, tiene que ser con validación interna dentro de cada
+  ventana de entrenamiento.
+- **Umbral de decisión en 0,5**, sin optimizar. Mover el umbral mirando el
+  resultado sería la misma trampa. Ver abiertos.
 - **Etiqueta de objetivo = primera publicación**, no la última revisión. Es el
-  valor que habrías tenido entrenando en tiempo real. Si algún día la lonja
-  revisa precios de forma sistemática, hay que revisitarlo (`features.py`,
-  `_tabla_objetivos`).
+  valor que habrías tenido entrenando en tiempo real. Si la lonja revisa precios
+  de forma sistemática, hay que revisitarlo (`features.py`, `_tabla_objetivos`).
 - **Los lags se alinean por calendario**, no por posición: si falta una semana
   el lag es `NaN`, no se cuela el vecino.
-- **1.100 filas es poco.** El backtest sacrifica los primeros 11 años como
-  entrenamiento mínimo y deja 522 puntos evaluables. Con esa n, diferencias de
-  MAPE menores de ~1 punto no son distinguibles del ruido; de ahí el test
-  pareado.
-- **El horizonte y el coste de almacenaje son parámetros**, no constantes
-  escritas por ahí (`config.py`). El coste de 0,01 €/kg conviene contrastarlo
-  con el cliente: mueve la tasa base de la clase positiva y por tanto todo (b).
+- **1.100 filas es poco.** Diferencias de MAPE menores de ~1 punto no son
+  distinguibles del ruido con esta n; de ahí el test pareado.
+- **El horizonte y el coste de almacenaje son parámetros** (`config.py`), no
+  constantes escritas por ahí.
 
-## Qué NO hay aquí, a propósito
+## Abiertos
 
-- Ningún modelo (ni LightGBM ni nada). Siguiente fase.
-- Ninguna fuente de datos real. Solo el loader falso.
-- Ninguna interfaz gráfica.
+Por orden de impacto:
+
+1. **Datos reales.** Todo lo anterior es sobre una serie que me inventé. Hace
+   falta decidir la fuente (MAPA, Mercabarna, lonja de Salamanca…) y, sobre
+   todo, si su histórico conserva la **fecha de publicación** real. Si solo hay
+   fecha de dato, la regla de doble fecha se sostiene con un supuesto sobre el
+   retardo, y eso hay que declararlo.
+2. **Validar el coste de almacenaje con el cliente.** 0,01 €/kg es una
+   suposición mía. Mueve la tasa base de la clase positiva y con ella toda la
+   evaluación de (b) y la cifra en euros.
+3. **Umbral de decisión.** El 0,5 no tiene por qué ser óptimo: comprar de más y
+   comprar de menos no cuestan lo mismo. Se puede optimizar **dentro de cada
+   ventana de entrenamiento** (nunca sobre el backtest) y evaluar si aporta.
+4. **El modelo económico es de juguete.** Decisiones semanales independientes,
+   sin inventario, sin capacidad de almacén, sin contratos, y sin considerar que
+   un comprador de 40.000 t/año mueve el mercado. Sirve como orden de magnitud;
+   para prometer ahorro hay que modelar las restricciones reales.
+5. **Sin intervalos de confianza en la predicción.** El envasador se beneficiaría
+   de saber cuándo el modelo no tiene ni idea, para no actuar esas semanas.
+6. **Reentreno semanal completo.** Con datos reales puede no ser necesario;
+   `reentrenar_cada` ya está parametrizado, falta medir si degrada.
 
 ## Cómo se enchufa un modelo en la fase siguiente
 

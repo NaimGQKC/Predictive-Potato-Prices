@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from patata import backtest, config, db, evaluacion, features, predictores
+from patata import (backtest, config, db, economia, evaluacion, features, placebo as
+                    mod_placebo, predictores)
 from patata.loaders import falso
 
 
@@ -16,6 +17,8 @@ def ejecutar(
     inicio: str = config.INICIO_BACKTEST,
     min_entreno: int = config.MIN_EJEMPLOS_ENTRENO,
     reentrenar_cada: int = 1,
+    predictores_usados=None,
+    placebo: bool = False,
 ) -> dict:
     """Ejecuta la fase completa y devuelve todo lo producido."""
     con = db.conectar(ruta_db)
@@ -28,7 +31,12 @@ def ejecutar(
     feats = features.construir_features(con, fuente=falso.FUENTE)
     backtest.auditar_pit(feats)
 
-    lista = [predictores.NaiveUltimoPrecio()]
+    if placebo:
+        # control negativo: se destruye la senyal y se comprueba que el
+        # aparato lo nota. Ver patata/placebo.py.
+        feats = mod_placebo.barajar_objetivos(feats)
+
+    lista = list(predictores.todos()) if predictores_usados is None else list(predictores_usados)
     res = backtest.walk_forward(
         feats,
         lista,
@@ -40,6 +48,7 @@ def ejecutar(
     resultados = evaluacion.tabla_resultados(res)
     por_anyo = evaluacion.tabla_por_anyo(res)
     comparacion = evaluacion.comparar_con_baseline(res, predictores.NaiveUltimoPrecio.nombre)
+    euros = economia.evaluar_decisiones(res.predicciones, coste_almacenaje=res.coste_almacenaje)
 
     _persistir(con, res, resultados)
 
@@ -51,6 +60,7 @@ def ejecutar(
         "resultados": resultados,
         "por_anyo": por_anyo,
         "comparacion": comparacion,
+        "economia": euros,
     }
 
 

@@ -85,7 +85,12 @@ def comparar_con_baseline(res: ResultadoBacktest, baseline: str) -> pd.DataFrame
                 "predictor": nombre,
                 "skill_mape": m.skill_score(fila["mape_pct"], base["mape_pct"]),
                 "skill_rmse": m.skill_score(fila["rmse_eur_kg"], base["rmse_eur_kg"]),
-                "delta_direccion": fila["acierto_direccion"] - base["acierto_direccion"],
+                # la naive no opina sobre la direccion, asi que su acierto es
+                # NaN y restarlo no dice nada. El liston util es apostar
+                # siempre a la direccion mas frecuente.
+                "direccion_vs_mayoritaria": (
+                    fila["acierto_direccion"] - fila["direccion_mayoritaria"]
+                ),
                 "delta_clf_acc_balanceada": (
                     fila["clf_acc_balanceada"] - base["clf_acc_balanceada"]
                 ),

@@ -29,10 +29,33 @@ MIN_EJEMPLOS_ENTRENO = 104  # ~2 anos
 # --- Features --------------------------------------------------------------
 # Retardos (en semanas, contados sobre la serie observada) que entran como
 # features. Se calculan siempre sobre el snapshot point-in-time.
-LAGS = (0, 1, 2, 3, 4, 8, 12, 26, 52)
+# El 48 y el 52 van juntos a proposito: su diferencia es la variacion a 4
+# semanas observada en el mismo tramo del calendario el anyo pasado, que es lo
+# que usa el baseline estacional.
+LAGS = (0, 1, 2, 3, 4, 8, 12, 26, 48, 52)
 VENTANAS_MEDIA = (4, 8, 13, 26, 52)
 
 # --- Loader falso ----------------------------------------------------------
 SEMANAS_SINTETICAS = 1100
 PRIMER_LUNES_SINTETICO = "2004-01-05"
 SEMILLA = 20240105
+
+# --- Modelos (fase 1) ------------------------------------------------------
+# Hiperparametros FIJOS, deliberadamente conservadores. Con ~500 puntos de
+# evaluacion, ajustarlos mirando el backtest es sobreajustar el backtest: la
+# mejora que saldria no existiria en produccion. Si algun dia se tunean, tiene
+# que ser con validacion interna dentro de cada ventana de entrenamiento.
+PARAMS_LGBM = {
+    "n_estimators": 300,
+    "learning_rate": 0.05,
+    "num_leaves": 7,
+    "min_child_samples": 25,
+    "subsample": 0.8,
+    "subsample_freq": 1,
+    "colsample_bytree": 0.7,
+    "reg_lambda": 1.0,
+    "verbosity": -1,
+    "n_jobs": 1,
+}
+ALPHA_RIDGE = 10.0
+C_LOGISTICA = 0.1
