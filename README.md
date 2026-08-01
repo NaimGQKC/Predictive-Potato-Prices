@@ -199,7 +199,18 @@ fecha atacan el problema por construcción; el placebo lo ataca por el resultado
 `python scripts/run_eval.py --placebo` baraja la variación objetivo entre
 orígenes dejando las features intactas. Después de barajar no queda nada que
 predecir, así que **todos los skill deben caer a ≤ 0 y las accuracy balanceadas
-a ~0,5**. Es lo que pasa. Si algún día un modelo gana en modo placebo, hay fuga.
+a ~0,5**. Es exactamente lo que pasa, sobre los mismos 522 orígenes:
+
+| predictor | skill MAPE | skill RMSE | Δ acc. balanceada | dm_t |
+|---|---|---|---|---|
+| lineal_regularizado | −0,018 | −0,017 | +0,014 | +2,21 |
+| lgbm | −0,091 | −0,067 | −0,004 | +4,69 |
+| naive_estacional | −0,334 | −0,357 | +0,006 | +7,10 |
+
+Compárese con el +0,348 de skill y el −5,69 de `dm_t` que saca el lineal con la
+señal intacta. El signo de `dm_t` se invierte: sin nada que predecir, los
+modelos son *peores* que la naive, que es justo lo que debe pasar. Si algún día
+un modelo gana en modo placebo, hay fuga.
 
 Merece la pena contar cómo salió, porque es instructivo: la primera versión del
 placebo **no colapsó** — los modelos seguían sacando skill 0,29 y accuracy
